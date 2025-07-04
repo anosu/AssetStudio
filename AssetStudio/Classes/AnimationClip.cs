@@ -1036,7 +1036,18 @@ namespace AssetStudio
         {
             var parsedAnimClip = JsonSerializer.Deserialize<AnimationClip>(type, jsonOptions);
             m_AnimationType = parsedAnimClip.m_AnimationType;
-            m_Legacy = parsedAnimClip.m_Legacy;
+            if (version >= 5)//5.0 and up
+            {
+                m_Legacy = parsedAnimClip.m_Legacy;
+            }
+            else if (version >= 4)//4.0 and up
+            {
+                m_Legacy = m_AnimationType == AnimationType.Legacy;
+            }
+            else
+            {
+                m_Legacy = true;
+            }
             m_Compressed = parsedAnimClip.m_Compressed;
             m_UseHighQualityCurve = parsedAnimClip.m_UseHighQualityCurve;
             m_RotationCurves = parsedAnimClip.m_RotationCurves;
@@ -1064,9 +1075,18 @@ namespace AssetStudio
             {
                 using (var muscleReader = new EndianBinaryReader(muscleStream, EndianType.LittleEndian))
                 {
-                    _ = muscleReader.ReadUInt32();
                     var objReader = new ObjectReader(muscleReader, assetsFile, objInfo);
-                    m_MuscleClip = new ClipMuscleConstant(objReader);
+                    if (!m_Legacy)
+                    {
+                        _ = objReader.ReadUInt32();
+                        m_MuscleClip = new ClipMuscleConstant(objReader);
+                    }
+                    else
+                    {
+                        m_EulerCurves = Vector3CurveArray(objReader);
+                        m_PositionCurves = Vector3CurveArray(objReader);
+                        m_ScaleCurves = Vector3CurveArray(objReader);
+                    }
                 }
             }
         }
@@ -1116,27 +1136,10 @@ namespace AssetStudio
             {
                 if (version >= (5, 3)) //5.3 and up
                 {
-                    int numEulerCurves = reader.ReadInt32();
-                    m_EulerCurves = new Vector3Curve[numEulerCurves];
-                    for (int i = 0; i < numEulerCurves; i++)
-                    {
-                        m_EulerCurves[i] = new Vector3Curve(reader);
-                    }
+                    m_EulerCurves = Vector3CurveArray(reader);
                 }
-
-                int numPCurves = reader.ReadInt32();
-                m_PositionCurves = new Vector3Curve[numPCurves];
-                for (int i = 0; i < numPCurves; i++)
-                {
-                    m_PositionCurves[i] = new Vector3Curve(reader);
-                }
-
-                int numSCurves = reader.ReadInt32();
-                m_ScaleCurves = new Vector3Curve[numSCurves];
-                for (int i = 0; i < numSCurves; i++)
-                {
-                    m_ScaleCurves[i] = new Vector3Curve(reader);
-                }
+                m_PositionCurves = Vector3CurveArray(reader);
+                m_ScaleCurves = Vector3CurveArray(reader);
             }
 
             int numFCurves = reader.ReadInt32();
@@ -1167,16 +1170,25 @@ namespace AssetStudio
             }
             if (version >= 4)//4.0 and up
             {
-                m_MuscleClipSize = reader.ReadUInt32();
+                m_MuscleClipSize = reader.ReadUInt32(); //m_AnimDataSize (Tuanjie)
                 if (!version.IsTuanjie)
                 {
                     m_MuscleClip = new ClipMuscleConstant(reader);
                 }
                 else if (m_MuscleClipSize > 0)
                 {
-                    _ = reader.ReadInt32();
-                    m_MuscleClip = new ClipMuscleConstant(reader); //m_AnimData (Tuanjie)
-                    m_StreamingInfo = new StreamingInfo(reader);
+                    if (!m_Legacy)
+                    {
+                        _ = reader.ReadInt32();
+                        m_MuscleClip = new ClipMuscleConstant(reader); //m_AnimData (Tuanjie)
+                        m_StreamingInfo = new StreamingInfo(reader);
+                    }
+                    else
+                    { 
+                        m_EulerCurves = Vector3CurveArray(reader);
+                        m_PositionCurves = Vector3CurveArray(reader);
+                        m_ScaleCurves = Vector3CurveArray(reader);
+                    }
                 }
             }
             if (version >= (4, 3)) //4.3 and up
@@ -1199,6 +1211,17 @@ namespace AssetStudio
             {
                 reader.AlignStream();
             }
+        }
+
+        private static Vector3Curve[] Vector3CurveArray(ObjectReader reader)
+        {
+            var curveNum = reader.ReadInt32();
+            var vector3Curve = new Vector3Curve[curveNum];
+            for (var i = 0; i < curveNum; i++)
+            {
+                vector3Curve[i] = new Vector3Curve(reader);
+            }
+            return vector3Curve;
         }
 
         public class EqComparer : IEqualityComparer<AnimationClip>

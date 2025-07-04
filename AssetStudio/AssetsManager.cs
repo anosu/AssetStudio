@@ -13,8 +13,9 @@ namespace AssetStudio
 {
     public class AssetsManager
     {
-        public bool ZstdEnabled = true;
         public bool LoadingViaTypeTreeEnabled = true;
+        public CompressionType CustomBlockCompression = CompressionType.Auto;
+        public CompressionType CustomBlockInfoCompression = CompressionType.Auto;
         public List<SerializedFile> assetsFileList = new List<SerializedFile>();
 
         internal Dictionary<string, int> assetsFileIndexCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -63,6 +64,7 @@ namespace AssetStudio
                 ClassIDType.ResourceManager,
                 ClassIDType.GameObject,
                 ClassIDType.Transform,
+                ClassIDType.RectTransform,
             });
 
             if (classIDTypes.Contains(ClassIDType.MonoBehaviour))
@@ -78,6 +80,18 @@ namespace AssetStudio
             {
                 filteredAssetTypesList.Add(ClassIDType.AnimatorController);
                 filteredAssetTypesList.Add(ClassIDType.AnimatorOverrideController);
+                filteredAssetTypesList.Add(ClassIDType.Animation);
+                filteredAssetTypesList.Add(ClassIDType.AnimationClip);
+                filteredAssetTypesList.Add(ClassIDType.Avatar);
+                filteredAssetTypesList.Add(ClassIDType.Material);
+                filteredAssetTypesList.Add(ClassIDType.MeshFilter);
+                filteredAssetTypesList.Add(ClassIDType.MeshRenderer);
+                filteredAssetTypesList.Add(ClassIDType.SkinnedMeshRenderer);
+            }
+            if (classIDTypes.Contains(ClassIDType.AnimatorController))
+            {
+                filteredAssetTypesList.Add(ClassIDType.Animator);
+                filteredAssetTypesList.Add(ClassIDType.AnimatorOverrideController);
             }
 
             filteredAssetTypesList.UnionWith(classIDTypes);
@@ -90,9 +104,7 @@ namespace AssetStudio
 
         public void LoadFilesAndFolders(params string[] path)
         {
-            var pathList = new List<string>();
-            pathList.AddRange(path);
-            LoadFilesAndFolders(out _, pathList);
+            LoadFilesAndFolders(out _, path);
         }
 
         public void LoadFilesAndFolders(out string parentPath, params string[] path)
@@ -105,15 +117,15 @@ namespace AssetStudio
         public void LoadFilesAndFolders(out string parentPath, List<string> pathList)
         {
             var fileList = new List<string>();
-            bool filesInPath = false;
+            var filesInPath = false;
             parentPath = "";
             foreach (var path in pathList)
             {
                 var fullPath = Path.GetFullPath(path);
                 if (Directory.Exists(fullPath))
                 {
-                    var parent = Directory.GetParent(fullPath).FullName;
-                    if (!filesInPath && (parentPath == "" || parentPath.Length > parent.Length))
+                    var parent = Directory.GetParent(fullPath)?.FullName;
+                    if (!filesInPath && (parentPath == "" || parentPath?.Length > parent?.Length))
                     {
                         parentPath = parent;
                     }
@@ -177,7 +189,10 @@ namespace AssetStudio
 
         private bool LoadFile(FileReader reader)
         {
-            switch (reader?.FileType)
+            if (reader == null)
+                return false;
+
+            switch (reader.FileType)
             {
                 case FileType.AssetsFile:
                     return LoadAssetsFile(reader);
@@ -237,6 +252,7 @@ namespace AssetStudio
                                 else
                                 {
                                     noexistFiles.Add(sharedFilePath);
+                                    Logger.Warning($"Dependency wasn't found: {sharedFilePath}");
                                 }
                             }
                         }
@@ -306,7 +322,7 @@ namespace AssetStudio
             
             try
             {
-                var bundleFile = new BundleFile(bundleReader, ZstdEnabled, specifiedUnityVersion);
+                var bundleFile = new BundleFile(bundleReader, CustomBlockInfoCompression, CustomBlockCompression, specifiedUnityVersion);
                 var isLoaded = LoadBundleFiles(bundleReader, bundleFile, originalPath);
                 if (!isLoaded)
                     return false;
@@ -315,6 +331,11 @@ namespace AssetStudio
                 {
                     bundleStream.Offset = reader.Position;
                     bundleReader = new FileReader($"{reader.FullPath}_0x{bundleStream.Offset:X}", bundleStream);
+                    if (bundleReader.FileType != FileType.BundleFile)
+                    {
+                        Logger.Debug("Unknown data was detected after the end of the bundle.");
+                        break;
+                    }
                     if (bundleReader.Position > 0)
                     {
                         bundleStream.Offset += bundleReader.Position;
@@ -322,7 +343,7 @@ namespace AssetStudio
                         bundleReader.FileName = $"{reader.FileName}_0x{bundleStream.Offset:X}";
                     }
                     Logger.Info($"[MultiBundle] Loading \"{reader.FileName}\" from offset: 0x{bundleStream.Offset:X}");
-                    bundleFile = new BundleFile(bundleReader, ZstdEnabled, specifiedUnityVersion);
+                    bundleFile = new BundleFile(bundleReader, CustomBlockInfoCompression, CustomBlockCompression, specifiedUnityVersion);
                     isLoaded = LoadBundleFiles(bundleReader, bundleFile, originalPath ?? reader.FullPath);
                 }
                 return isLoaded;

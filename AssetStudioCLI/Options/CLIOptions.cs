@@ -27,6 +27,7 @@ namespace AssetStudioCLI.Options
         Info,
         Live2D,
         SplitObjects,
+        Animator,
     }
 
     internal enum AssetGroupOption
@@ -68,18 +69,18 @@ namespace AssetStudioCLI.Options
         NameAndContainer,
     }
 
-    internal enum CustomCompressionType
+    internal enum AnimationExportMode
     {
-        Zstd,
-        Lz4,
+        Auto,
+        Skip,
+        All,
     }
 
     internal static class CLIOptions
     {
         public static bool isParsed;
-        public static bool showHelp;
         public static string[] cliArgs;
-        public static string inputPath;
+        public static List<string> inputPathList;
         public static FilterBy filterBy;
         private static Dictionary<string, string> optionsDict;
         private static Dictionary<string, string> flagsDict;
@@ -108,14 +109,17 @@ namespace AssetStudioCLI.Options
         //fbx
         public static Option<float> o_fbxScaleFactor;
         public static Option<int> o_fbxBoneSize;
+        public static Option<AnimationExportMode> o_fbxAnimMode;
         public static Option<bool> f_fbxUvsAsDiffuseMaps;
         //filter
         public static Option<List<string>> o_filterByName;
         public static Option<List<string>> o_filterByContainer;
         public static Option<List<string>> o_filterByPathID;
         public static Option<List<string>> o_filterByText;
+        public static Option<bool> f_filterWithRegex;
         //advanced
-        public static Option<CustomCompressionType> o_customCompressionType;
+        public static Option<CompressionType> o_bundleBlockInfoCompression;
+        public static Option<CompressionType> o_bundleBlockCompression;
         public static Option<int> o_maxParallelExportTasks;
         public static Option<ExportListType> o_exportAssetList;
         public static Option<string> o_assemblyPath;
@@ -161,9 +165,8 @@ namespace AssetStudioCLI.Options
         private static void InitOptions()
         {
             isParsed = false;
-            showHelp = false;
             cliArgs = null;
-            inputPath = "";
+            inputPathList = new List<string>();
             filterBy = FilterBy.None;
             optionsDict = new Dictionary<string, string>();
             flagsDict = new Dictionary<string, string>();
@@ -190,14 +193,15 @@ namespace AssetStudioCLI.Options
                 optionDefaultValue: WorkMode.Export,
                 optionName: "-m, --mode <value>",
                 optionDescription: "Specify working mode\n" +
-                    "<Value: extract | export(default) | exportRaw | dump | info | live2d | splitObjects>\n" +
-                    "Extract - Extracts(Decompresses) asset bundles\n" +
-                    "Export - Exports converted assets\n" +
-                    "ExportRaw - Exports raw data\n" +
-                    "Dump - Makes asset dumps\n" +
-                    "Info - Loads file(s), shows the number of available for export assets and exits\n" +
-                    "Live2D - Exports Live2D Cubism models\n" +
-                    "SplitObjects - Exports split objects (fbx)\n",
+                    "<Value: extract | export(default) | exportRaw | dump | info | live2d |\nsplitObjects | animator>\n" +
+                    "Extract - Extract(Decompress) asset bundles\n" +
+                    "Export - Convert and export assets\n" +
+                    "ExportRaw - Export raw assets\n" +
+                    "Dump - Generate json dumps of loaded asset\n" +
+                    "Info - Load file(s) and show the number of available for export assets\n" +
+                    "Live2D - Export Live2D Cubism models\n" +
+                    "SplitObjects - Export all model objects (split) (fbx)\n" +
+                    "Animator - Export Animator assets (fbx)\n",
                 optionExample: "Example: \"-m info\"\n",
                 optionHelpGroup: HelpGroups.General
             );
@@ -208,7 +212,7 @@ namespace AssetStudioCLI.Options
                 optionDescription: "Specify asset type(s) to export\n" +
                     "<Value(s): tex2d, tex2dArray, sprite, textAsset, monoBehaviour, font, shader\n" +
                     "movieTexture, audio, video, mesh | all(default)>\n" +
-                    "All - export all asset types, which are listed in the values\n" +
+                    "All - Export all asset types listed in the values\n" +
                     "*To specify multiple asset types, write them separated by ',' or ';' without spaces\n",
                 optionExample: "Examples: \"-t sprite\" or \"-t tex2d,sprite,audio\" or \"-t tex2d;sprite;font\"\n",
                 optionHelpGroup: HelpGroups.General
@@ -372,6 +376,18 @@ namespace AssetStudioCLI.Options
                 optionExample: "Example: \"--fbx-bone-size 10\"\n",
                 optionHelpGroup: HelpGroups.FBX
             );
+            o_fbxAnimMode = new GroupedOption<AnimationExportMode>
+            (
+                optionDefaultValue: AnimationExportMode.Auto,
+                optionName: "--fbx-animation",
+                optionDescription: "Specify the FBX animation export mode\n" + 
+                    "<Value: auto(default) | skip | all>\n" +
+                    "Auto - Search for model-related animations and export model with them\n" +
+                    "Skip - Don't export animations\n" +
+                    "All - Try to bind all loaded animations to each loaded model\n",
+                optionExample: "--fbx-animation skip\n",
+                optionHelpGroup: HelpGroups.FBX
+            );
             f_fbxUvsAsDiffuseMaps = new GroupedOption<bool>
             (
                 optionDefaultValue: false,
@@ -389,7 +405,7 @@ namespace AssetStudioCLI.Options
             (
                 optionDefaultValue: new List<string>(),
                 optionName: "--filter-by-name <text>",
-                optionDescription: "Specify the name by which assets should be filtered\n" +
+                optionDescription: "Specify the name or regexp by which assets should be filtered\n" +
                     "*To specify multiple names write them separated by ',' or ';' without spaces\n",
                 optionExample: "Example: \"--filter-by-name char\" or \"--filter-by-name char,bg\"\n",
                 optionHelpGroup: HelpGroups.Filter
@@ -398,7 +414,7 @@ namespace AssetStudioCLI.Options
             (
                 optionDefaultValue: new List<string>(),
                 optionName: "--filter-by-container <text>",
-                optionDescription: "Specify the container by which assets should be filtered\n" +
+                optionDescription: "Specify the container or regexp by which assets should be filtered\n" +
                     "*To specify multiple containers write them separated by ',' or ';' without spaces\n",
                 optionExample: "Example: \"--filter-by-container arts\" or \"--filter-by-container arts,icons\"\n",
                 optionHelpGroup: HelpGroups.Filter
@@ -416,24 +432,52 @@ namespace AssetStudioCLI.Options
             (
                 optionDefaultValue: new List<string>(),
                 optionName: "--filter-by-text <text>",
-                optionDescription: "Specify the text by which assets should be filtered\n" +
+                optionDescription: "Specify the text or regexp by which assets should be filtered\n" +
                     "Looks for assets that contain the specified text in their names or containers\n" +
                     "*To specify multiple values write them separated by ',' or ';' without spaces\n",
-                optionExample: "Example: \"--filter-by-text portrait\" or \"--filter-by-text portrait,art\"",
+                optionExample: "Example: \"--filter-by-text portrait\" or \"--filter-by-text portrait,art\"\n",
                 optionHelpGroup: HelpGroups.Filter
+            );
+            f_filterWithRegex = new GroupedOption<bool>
+            (
+                optionDefaultValue: false,
+                optionName: "--filter-with-regex",
+                optionDescription: "(Flag) If specified, the filter options will handle the specified text\n" +
+                    "as a regular expression (doesn't apply to --filter-by-pathid)",
+                optionExample: "",
+                optionHelpGroup: HelpGroups.Filter,
+                isFlag: true
             );
             #endregion
 
             #region Init Advanced Options
-            o_customCompressionType = new GroupedOption<CustomCompressionType>
+            o_bundleBlockInfoCompression = new GroupedOption<CompressionType>
             (
-                optionDefaultValue: CustomCompressionType.Zstd,
-                optionName: "--custom-compression <value>",
-                optionDescription: "Specify the compression type for assets that use custom compression\n" + 
-                    "<Value: zstd(default) | lz4>\n" +
+                optionDefaultValue: CompressionType.Auto,
+                optionName: "--blockinfo-comp <value>",
+                optionDescription: "Specify the compression type of bundle's blockInfo data\n" + 
+                    "<Value: auto(default) | zstd | oodle | lz4 | lzma>\n" +
+                    "Auto - Use compression type specified in an asset bundle\n" +
                     "Zstd - Try to decompress as zstd archive\n" +
-                    "Lz4 - Try to decompress as lz4 archive\n",
-                optionExample: "Example: \"--custom-compression lz4\"\n",
+                    "Oodle - Try to decompress as oodle archive\n" +
+                    "Lz4 - Try to decompress as lz4/lz4hc archive\n" +
+                    "Lzma - Try to decompress as lzma archive\n",
+                optionExample: "Example: \"--blockinfo-comp lz4\"\n",
+                optionHelpGroup: HelpGroups.Advanced
+            );
+
+            o_bundleBlockCompression = new GroupedOption<CompressionType>
+            (
+                optionDefaultValue: CompressionType.Auto,
+                optionName: "--block-comp <value>",
+                optionDescription: "Specify the compression type of bundle's block data\n" +
+                    "<Value: auto(default) | zstd | oodle | lz4 | lzma>\n" +
+                    "Auto - Use compression type specified in an asset bundle\n" +
+                    "Zstd - Try to decompress as zstd archive\n" +
+                    "Oodle - Try to decompress as oodle archive\n" +
+                    "Lz4 - Try to decompress as lz4/lz4hc archive\n" +
+                    "Lzma - Try to decompress as lzma archive\n",
+                optionExample: "Example: \"--block-comp zstd\"\n",
                 optionHelpGroup: HelpGroups.Advanced
             );
 
@@ -478,7 +522,7 @@ namespace AssetStudioCLI.Options
             (
                 optionDefaultValue: false,
                 optionName: "--not-restore-extension",
-                optionDescription: "(Flag) If specified, AssetStudio will not try to use/restore original TextAsset\nextension name, and will just export all TextAssets with the \".txt\" extension\n",
+                optionDescription: "(Flag) If specified, Studio will not try to use/restore original TextAsset extension,\nand will just export all TextAssets with the \".txt\" extension\n",
                 optionExample: "",
                 optionHelpGroup: HelpGroups.Advanced,
                 isFlag: true
@@ -487,7 +531,7 @@ namespace AssetStudioCLI.Options
             (
                 optionDefaultValue: false,
                 optionName: "--avoid-typetree-loading",
-                optionDescription: "(Flag) If specified, AssetStudio will not try to parse assets at load time\nusing their type tree\n",
+                optionDescription: "(Flag) If specified, Studio will not try to parse assets at load time\nusing their type tree\n",
                 optionExample: "",
                 optionHelpGroup: HelpGroups.Advanced,
                 isFlag: true
@@ -496,7 +540,7 @@ namespace AssetStudioCLI.Options
             (
                 optionDefaultValue: false,
                 optionName: "--load-all",
-                optionDescription: "(Flag) If specified, AssetStudio will load assets of all types\n(Only for Dump, Info and ExportRaw modes)",
+                optionDescription: "(Flag) If specified, Studio will load assets of all types\n(Only for Dump, Info and ExportRaw modes)",
                 optionExample: "",
                 optionHelpGroup: HelpGroups.Advanced,
                 isFlag: true
@@ -513,18 +557,22 @@ namespace AssetStudioCLI.Options
 
             if (args.Length == 0 || args.Any(x => x.ToLower() == "-h" || x.ToLower() == "--help" || x.ToLower() == "-?"))
             {
-                showHelp = true;
+                o_displayHelp.Value = true;
                 return;
             }
 
             if (!args[0].StartsWith("-"))
             {
-                inputPath = Path.GetFullPath(args[0]).Replace("\"", "");
-                if (!Directory.Exists(inputPath) && !File.Exists(inputPath))
+                foreach (var path in ValueSplitter(args[0]))
                 {
-                    Console.WriteLine($"{"Error:".Color(brightRed)} Invalid input path \"{args[0].Color(brightRed)}\".\n" +
-                        $"Specified file or folder was not found. The input path must be specified as the first argument.");
-                    return;
+                    var fullPath = Path.GetFullPath(path).Replace("\"", "");
+                    if (!Directory.Exists(fullPath) && !File.Exists(fullPath))
+                    {
+                        Console.WriteLine($"{"Error:".Color(brightRed)} Invalid input path \"{fullPath.Color(brightRed)}\".\n" +
+                                          $"Specified file or folder was not found. The input path must be specified as the first argument.");
+                        return;
+                    }
+                    inputPathList.Add(fullPath);
                 }
             }
             else
@@ -533,35 +581,34 @@ namespace AssetStudioCLI.Options
                 return;
             }
 
-            var resplittedArgs = new List<string>();
-            for (int i = 1; i < args.Length; i++)
+            var processedArgs = new List<string>();
+            for (var i = 1; i < args.Length; i++)
             {
-                string arg = args[i];
-
+                var arg = args[i];
                 if (arg.Contains('='))
                 {
-                    var splittedArgs = arg.Split('=');
-                    resplittedArgs.Add(splittedArgs[0]);
-                    resplittedArgs.Add(splittedArgs[1]);
+                    var splitArgs = arg.Split('=');
+                    processedArgs.Add(splitArgs[0]);
+                    processedArgs.Add(splitArgs[1]);
                 }
                 else
                 {
-                    resplittedArgs.Add(arg);
-                }    
-            };
+                    processedArgs.Add(arg);
+                }
+            }
 
             #region Parse "Working Mode" Option
-            var workModeOptionIndex = resplittedArgs.FindIndex(x => x.ToLower() == "-m" || x.ToLower() == "--mode");
+            var workModeOptionIndex = processedArgs.FindIndex(x => x.ToLower() == "-m" || x.ToLower() == "--mode");
             if (workModeOptionIndex >= 0)
             {
-                var option = resplittedArgs[workModeOptionIndex];
-                if (workModeOptionIndex + 1 >= resplittedArgs.Count)
+                var option = processedArgs[workModeOptionIndex];
+                if (workModeOptionIndex + 1 >= processedArgs.Count)
                 {
                     Console.WriteLine($"{"Error during parsing options:".Color(brightRed)} Value for [{option.Color(brightYellow)}] option was not found.\n");
                     TryFindOptionDescription(option, optionsDict);
                     return;
                 }
-                var value = resplittedArgs[workModeOptionIndex + 1];
+                var value = processedArgs[workModeOptionIndex + 1];
                 switch (value.ToLower())
                 {
                     case "extract":
@@ -585,22 +632,23 @@ namespace AssetStudioCLI.Options
                         o_workMode.Value = WorkMode.Live2D;
                         o_exportAssetTypes.Value = new List<ClassIDType>
                         {
+                            ClassIDType.Animation,
                             ClassIDType.AnimationClip,
-                            ClassIDType.Animator,
+                            ClassIDType.AnimatorController,
                             ClassIDType.MonoBehaviour,
                             ClassIDType.Texture2D,
                         };
                         break;
+                    case "animator":
                     case "splitobjects":
-                        o_workMode.Value = WorkMode.SplitObjects;
+                        o_workMode.Value = value.ToLower() == "animator"
+                            ? WorkMode.Animator
+                            : WorkMode.SplitObjects;
                         o_exportAssetTypes.Value = new List<ClassIDType>
                         {
-                            ClassIDType.Texture2D,
-                            ClassIDType.Material,
+                            ClassIDType.Animator,
                             ClassIDType.Mesh,
-                            ClassIDType.MeshRenderer,
-                            ClassIDType.MeshFilter,
-                            ClassIDType.SkinnedMeshRenderer,
+                            ClassIDType.Texture2D,
                         };
                         break;
                     default:
@@ -608,14 +656,14 @@ namespace AssetStudioCLI.Options
                         ShowOptionDescription(o_workMode);
                         return;
                 }
-                resplittedArgs.RemoveRange(workModeOptionIndex, 2);
+                processedArgs.RemoveRange(workModeOptionIndex, 2);
             }
             #endregion
 
             #region Parse Flags
-            for (var i = 0; i < resplittedArgs.Count; i++) 
+            for (var i = 0; i < processedArgs.Count; i++) 
             {
-                var flag = resplittedArgs[i].ToLower();
+                var flag = processedArgs[i].ToLower();
 
                 switch(flag)
                 {
@@ -627,7 +675,7 @@ namespace AssetStudioCLI.Options
                             return;
                         }
                         f_l2dAssetSearchByFilename.Value = true;
-                        resplittedArgs.RemoveAt(i);
+                        processedArgs.RemoveAt(i);
                         break;
                     case "--l2d-force-bezier":
                         if (o_workMode.Value != WorkMode.Live2D)
@@ -637,7 +685,7 @@ namespace AssetStudioCLI.Options
                             return;
                         }
                         f_l2dForceBezier.Value = true;
-                        resplittedArgs.RemoveAt(i);
+                        processedArgs.RemoveAt(i);
                         break;
                     case "--fbx-uvs-as-diffuse":
                         if (o_workMode.Value != WorkMode.SplitObjects)
@@ -647,15 +695,19 @@ namespace AssetStudioCLI.Options
                             return;
                         }
                         f_fbxUvsAsDiffuseMaps.Value = true;
-                        resplittedArgs.RemoveAt(i);
+                        processedArgs.RemoveAt(i);
+                        break;
+                    case "--filter-with-regex":
+                        f_filterWithRegex.Value = true;
+                        processedArgs.RemoveAt(i);
                         break;
                     case "--not-restore-extension":
                         f_notRestoreExtensionName.Value = true;
-                        resplittedArgs.RemoveAt(i);
+                        processedArgs.RemoveAt(i);
                         break;
                     case "--avoid-typetree-loading":
                         f_avoidLoadingViaTypetree.Value = true;
-                        resplittedArgs.RemoveAt(i);
+                        processedArgs.RemoveAt(i);
                         break;
                     case "--load-all":
                         switch (o_workMode.Value)
@@ -664,7 +716,7 @@ namespace AssetStudioCLI.Options
                             case WorkMode.Dump:
                             case WorkMode.Info:
                                 f_loadAllAssets.Value = true;
-                                resplittedArgs.RemoveAt(i);
+                                processedArgs.RemoveAt(i);
                                 break;
                             default:
                                 Console.WriteLine($"{"Error".Color(brightRed)} during parsing [{flag.Color(brightYellow)}] flag. This flag is not suitable for the current working mode [{o_workMode.Value}].\n");
@@ -677,23 +729,29 @@ namespace AssetStudioCLI.Options
             #endregion
 
             #region Parse Options
-            for (var i = 0; i < resplittedArgs.Count; i++)
+            for (var i = 0; i < processedArgs.Count; i++)
             {
-                var option = resplittedArgs[i].ToLower();
+                var option = processedArgs[i].ToLower();
                 try
                 {
-                    var value = resplittedArgs[i + 1].Replace("\"", "");
+                    var value = processedArgs[i + 1].Replace("\"", "");
                     switch (option)
                     {
                         case "-t":
                         case "--asset-type":
-                            if (o_workMode.Value == WorkMode.Live2D || o_workMode.Value == WorkMode.SplitObjects)
+                            if (o_workMode.Value == WorkMode.Live2D || o_workMode.Value == WorkMode.SplitObjects || o_workMode.Value == WorkMode.Animator)
                             {
                                 i++;
                                 continue;
                             }
                             var splittedTypes = ValueSplitter(value);
                             o_exportAssetTypes.Value = new List<ClassIDType>();
+                            if (splittedTypes.Contains("all", StringComparer.OrdinalIgnoreCase))
+                            {
+                                o_exportAssetTypes.Value = exportableAssetTypes;
+                                i++;
+                                continue;
+                            }
                             foreach (var type in splittedTypes)
                             {
                                 switch (type.ToLower())
@@ -710,8 +768,14 @@ namespace AssetStudioCLI.Options
                                     case "video":
                                         o_exportAssetTypes.Value.Add(ClassIDType.VideoClip);
                                         break;
-                                    case "all":
-                                        o_exportAssetTypes.Value = exportableAssetTypes;
+                                    case "animator":
+                                        if (o_workMode.Value == WorkMode.Export)
+                                        {
+                                            Console.WriteLine($"{"Not supported in current mode".Color(brightYellow)}. To export Animator assets use \"Animator mode\".\n");
+                                            ShowOptionDescription(o_workMode);
+                                            return;
+                                        }
+                                        o_exportAssetTypes.Value.Add(ClassIDType.Animator);
                                         break;
                                     default:
                                         var isKnownType = knownAssetTypesDict.TryGetValue(type.ToLower(), out var assetType);
@@ -975,19 +1039,71 @@ namespace AssetStudioCLI.Options
                             }
                             break;
                         }
-                        case "--custom-compression":
+                        case "--fbx-animation":
                             switch (value.ToLower())
                             {
+                                case "auto":
+                                    o_fbxAnimMode.Value = AnimationExportMode.Auto;
+                                    break;
+                                case "skip":
+                                    o_fbxAnimMode.Value = AnimationExportMode.Skip;
+                                    break;
+                                case "all":
+                                    o_fbxAnimMode.Value = AnimationExportMode.All;
+                                    break;
+                                default:
+                                    Console.WriteLine($"{"Error".Color(brightRed)} during parsing [{option.Color(brightYellow)}] option. Unsupported animation export mode: [{value.Color(brightRed)}].\n");
+                                    ShowOptionDescription(o_fbxAnimMode);
+                                    return;
+                            }
+                            break;
+                        case "--blockinfo-comp":
+                            switch (value.ToLower())
+                            {
+                                case "auto":
+                                    o_bundleBlockInfoCompression.Value = CompressionType.Auto;
+                                    break;
                                 case "zstd":
-                                    o_customCompressionType.Value = CustomCompressionType.Zstd;
+                                    o_bundleBlockInfoCompression.Value = CompressionType.Zstd;
+                                    break;
+                                case "oodle":
+                                    o_bundleBlockInfoCompression.Value = CompressionType.Oodle;
                                     break;
                                 case "lz4":
                                 case "lz4hc":
-                                    o_customCompressionType.Value = CustomCompressionType.Lz4;
+                                    o_bundleBlockInfoCompression.Value = CompressionType.Lz4HC;
+                                    break;
+                                case "lzma":
+                                    o_bundleBlockInfoCompression.Value = CompressionType.Lzma;
                                     break;
                                 default:
                                     Console.WriteLine($"{"Error".Color(brightRed)} during parsing [{option.Color(brightYellow)}] option. Unsupported compression type: [{value.Color(brightRed)}].\n");
-                                    ShowOptionDescription(o_customCompressionType);
+                                    ShowOptionDescription(o_bundleBlockInfoCompression);
+                                    return;
+                            }
+                            break;
+                        case "--block-comp":
+                            switch (value.ToLower())
+                            {
+                                case "auto":
+                                    o_bundleBlockCompression.Value = CompressionType.Auto;
+                                    break;
+                                case "zstd":
+                                    o_bundleBlockCompression.Value = CompressionType.Zstd;
+                                    break;
+                                case "oodle":
+                                    o_bundleBlockCompression.Value = CompressionType.Oodle;
+                                    break;
+                                case "lz4":
+                                case "lz4hc":
+                                    o_bundleBlockCompression.Value = CompressionType.Lz4HC;
+                                    break;
+                                case "lzma":
+                                    o_bundleBlockCompression.Value = CompressionType.Lzma;
+                                    break;
+                                default:
+                                    Console.WriteLine($"{"Error".Color(brightRed)} during parsing [{option.Color(brightYellow)}] option. Unsupported compression type: [{value.Color(brightRed)}].\n");
+                                    ShowOptionDescription(o_bundleBlockCompression);
                                     return;
                             }
                             break;
@@ -1030,11 +1146,11 @@ namespace AssetStudioCLI.Options
                             }
                             break;
                         case "--filter-by-name":
-                            o_filterByName.Value.AddRange(ValueSplitter(value));
+                            o_filterByName.Value.AddRange(ValueSplitter(value, isRegex: f_filterWithRegex.Value));
                             filterBy = filterBy == FilterBy.None ? FilterBy.Name : filterBy == FilterBy.Container ? FilterBy.NameAndContainer : filterBy;
                             break;
                         case "--filter-by-container":
-                            o_filterByContainer.Value.AddRange(ValueSplitter(value));
+                            o_filterByContainer.Value.AddRange(ValueSplitter(value, isRegex: f_filterWithRegex.Value));
                             filterBy = filterBy == FilterBy.None ? FilterBy.Container : filterBy == FilterBy.Name ? FilterBy.NameAndContainer : filterBy;
                             break;
                         case "--filter-by-pathid":
@@ -1042,7 +1158,7 @@ namespace AssetStudioCLI.Options
                             filterBy = FilterBy.PathID;
                             break;
                         case "--filter-by-text":
-                            o_filterByText.Value.AddRange(ValueSplitter(value));
+                            o_filterByText.Value.AddRange(ValueSplitter(value, isRegex: f_filterWithRegex.Value));
                             filterBy = FilterBy.NameOrContainer;
                             break;
                         case "--assembly-folder":
@@ -1125,9 +1241,12 @@ namespace AssetStudioCLI.Options
             isParsed = true;
         }
 
-        private static string[] ValueSplitter(string value)
+        private static string[] ValueSplitter(string value, bool isRegex = false)
         {
-            var separator = value.Contains(';') ? ';' : ',';
+            if (isRegex)
+                return new[] {value};
+
+            var separator = value.Contains(',') ? ',' : ';';
             return value.Split(separator);
         }
 
@@ -1160,7 +1279,7 @@ namespace AssetStudioCLI.Options
             var helpMessage = new StringBuilder();
             var usage = new StringBuilder();
             var appAssembly = typeof(Program).Assembly.GetName();
-            usage.Append($"{"Usage:".Color(ColorConsole.BrightYellow)} {appAssembly.Name} <input path to asset file/folder> ");
+            usage.Append($"{"Usage:".Color(ColorConsole.BrightYellow)} {appAssembly.Name} <input path to asset file(s)/folder> ");
 
             var i = 0;
             foreach (var optionsGroup in optionGroups.Keys)
@@ -1235,79 +1354,70 @@ namespace AssetStudioCLI.Options
             var sb = new StringBuilder();
             sb.AppendLine("[Current Options]");
             sb.AppendLine($"# Working Mode: {o_workMode}");
-            if (o_customCompressionType.Value != o_customCompressionType.DefaultValue)
-            {
-                sb.AppendLine($"# Custom Compression Type: {o_customCompressionType}");
-            }
-            if (o_workMode.Value != WorkMode.Extract)
-            {
-                sb.AppendLine($"# Parse Assets Using TypeTree: {!f_avoidLoadingViaTypetree.Value}");
-            }
-            sb.AppendLine($"# Input Path: \"{inputPath}\"");
+            sb.AppendLine($"# Input Path: \"{string.Join("\"\n- \"", inputPathList)}\"");
             if (o_workMode.Value != WorkMode.Info)
             {
                 sb.AppendLine($"# Output Path: \"{o_outputFolder}\"");
+            }
+            sb.AppendLine($"# Log Level: {o_logLevel}");
+            sb.AppendLine($"# Log Output: {o_logOutput}");
+            sb.AppendLine($"# Bundle BlockInfo Compression Type: {o_bundleBlockInfoCompression}");
+            sb.AppendLine($"# Bundle Block Compression Type: {o_bundleBlockCompression}");
+            sb.AppendLine($"# Unity Version: {unityVer}");
+            if (o_workMode.Value != WorkMode.Extract)
+            {
+                sb.AppendLine($"# Parse Assets Using TypeTree: {!f_avoidLoadingViaTypetree.Value}");
+                sb.AppendLine($"# Export Asset List: {o_exportAssetList}");
             }
             switch (o_workMode.Value)
             {
                 case WorkMode.Export:
                 case WorkMode.ExportRaw:
                 case WorkMode.Dump:
+                case WorkMode.Info:
                     if (o_workMode.Value != WorkMode.Export)
                     {
                         sb.AppendLine($"# Load All Assets: {f_loadAllAssets}");
                     }
                     sb.AppendLine(ShowExportTypes());
-                    sb.AppendLine($"# Asset Group Option: {o_groupAssetsBy}");
-                    sb.AppendLine($"# Filename format: {o_filenameFormat}");
+                    if (o_workMode.Value != WorkMode.Info)
+                    {
+                        sb.AppendLine($"# Asset Group Option: {o_groupAssetsBy}");
+                        sb.AppendLine($"# Filename format: {o_filenameFormat}");
+                    }
                     if (o_workMode.Value == WorkMode.Export)
                     {
                         sb.AppendLine($"# Export Image Format: {o_imageFormat}");
                         sb.AppendLine($"# Export Audio Format: {o_audioFormat}");
-                    }
-                    sb.AppendLine($"# Log Level: {o_logLevel}");
-                    sb.AppendLine($"# Log Output: {o_logOutput}");
-                    sb.AppendLine($"# Export Asset List: {o_exportAssetList}");
-                    sb.AppendLine(ShowCurrentFilter());
-                    sb.AppendLine($"# Assembly Path: \"{o_assemblyPath}\"");
-                    sb.AppendLine($"# Unity Version: {unityVer}");
-                    if (o_workMode.Value == WorkMode.Export)
-                    {
-                        sb.AppendLine($"# Max Parallel Export Tasks: {o_maxParallelExportTasks}");
                         sb.AppendLine($"# Restore TextAsset Extension: {!f_notRestoreExtensionName.Value}");
+                        sb.AppendLine($"# Max Parallel Export Tasks: {o_maxParallelExportTasks}");
                     }
-                    break;
-                case WorkMode.Info:
-                    sb.AppendLine($"# Load All Assets: {f_loadAllAssets}");
-                    sb.AppendLine(ShowExportTypes());
-                    sb.AppendLine($"# Log Level: {o_logLevel}");
-                    sb.AppendLine($"# Log Output: {o_logOutput}");
-                    sb.AppendLine($"# Export Asset List: {o_exportAssetList}");
                     sb.AppendLine(ShowCurrentFilter());
-                    sb.AppendLine($"# Unity Version: {unityVer}");
+                    sb.AppendLine($"# Filter With Regex: {f_filterWithRegex}");
+                    sb.AppendLine($"# Assembly Path: \"{o_assemblyPath}\"");
                     break;
                 case WorkMode.Live2D:
+                    sb.AppendLine($"# [{o_workMode} Options]");
+                    sb.AppendLine($"# Filter by Text: \"{string.Join("\", \"", o_filterByText.Value)}\"");
+                    sb.AppendLine($"# Filter With Regex: {f_filterWithRegex}");
+                    sb.AppendLine($"# Model Group Option: {o_l2dGroupOption}");
+                    sb.AppendFormat("# Search Model-related Assets by: {0}\n", f_l2dAssetSearchByFilename.Value ? "FileName" : "Container");
+                    sb.AppendLine($"# Motion Export Method: {o_l2dMotionMode}");
+                    sb.AppendLine($"# Force Bezier: {f_l2dForceBezier}");
+                    sb.AppendLine($"# Assembly Path: \"{o_assemblyPath}\"");
+                    break;
                 case WorkMode.SplitObjects:
-                    sb.AppendLine($"# Log Level: {o_logLevel}");
-                    sb.AppendLine($"# Log Output: {o_logOutput}");
-                    sb.AppendLine($"# Export Asset List: {o_exportAssetList}");
-                    if (o_workMode.Value == WorkMode.SplitObjects)
-                    {
-                        sb.AppendLine($"# Export Image Format: {o_imageFormat}");
-                        sb.AppendLine($"# Filter by Name(s): \"{string.Join("\", \"", o_filterByName.Value)}\"");
-                        sb.AppendLine($"# FBX Scale Factor: {o_fbxScaleFactor}");
-                        sb.AppendLine($"# FBX Bone Size: {o_fbxBoneSize}");
-                        sb.AppendLine($"# FBX UVs as Diffuse Maps: {f_fbxUvsAsDiffuseMaps}");
-                    }
-                    else
-                    {
-                        sb.AppendLine($"# Model Group Option: {o_l2dGroupOption}");
-                        sb.AppendFormat("# Search Model-related Assets by: {0}\n", f_l2dAssetSearchByFilename.Value ? "FileName" : "Container");
-                        sb.AppendLine($"# Motion Export Method: {o_l2dMotionMode}");
-                        sb.AppendLine($"# Force Bezier: {f_l2dForceBezier }");
-                        sb.AppendLine($"# Assembly Path: \"{o_assemblyPath}\"");
-                    }
-                    sb.AppendLine($"# Unity Version: {unityVer}");
+                case WorkMode.Animator:
+                    sb.AppendLine($"# [{o_workMode} Options]");
+                    sb.AppendLine(o_workMode.Value == WorkMode.Animator
+                        ? ShowCurrentFilter()
+                        : $"# Filter by Name(s): \"{string.Join("\", \"", o_filterByName.Value)}\"");
+                    sb.AppendLine($"# Filter With Regex: {f_filterWithRegex}");
+                    sb.AppendLine($"# Export Image Format: {o_imageFormat}");
+                    sb.AppendLine($"# FBX Scale Factor: {o_fbxScaleFactor}");
+                    sb.AppendLine($"# FBX Bone Size: {o_fbxBoneSize}");
+                    sb.AppendLine($"# FBX Animation Mode: {o_fbxAnimMode}");
+                    sb.AppendLine($"# FBX UVs as Diffuse Maps: {f_fbxUvsAsDiffuseMaps}");
                     break;
             }
             sb.AppendLine("======");

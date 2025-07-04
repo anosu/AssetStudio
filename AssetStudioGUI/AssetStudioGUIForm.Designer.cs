@@ -47,8 +47,10 @@
             this.useDumpTreeViewToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.buildTreeStructureToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.customCompressionTypeToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.customCompressionZstdToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.customCompressionLZ4ToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.blockInfoCompressionToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem = new System.Windows.Forms.ToolStripComboBox();
+            this.blockCompressionToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.customBlockCompressionComboBoxToolStripMenuItem = new System.Windows.Forms.ToolStripComboBox();
             this.toolStripMenuItem14 = new System.Windows.Forms.ToolStripMenuItem();
             this.specifyUnityVersion = new System.Windows.Forms.ToolStripTextBox();
             this.showExpOpt = new System.Windows.Forms.ToolStripMenuItem();
@@ -101,6 +103,7 @@
             this.splitContainer1 = new System.Windows.Forms.SplitContainer();
             this.tabControl1 = new System.Windows.Forms.TabControl();
             this.tabPage1 = new System.Windows.Forms.TabPage();
+            this.sceneExactSearchCheckBox = new System.Windows.Forms.CheckBox();
             this.sceneTreeView = new AssetStudioGUI.GOHierarchy();
             this.treeSearch = new System.Windows.Forms.TextBox();
             this.tabPage2 = new System.Windows.Forms.TabPage();
@@ -295,8 +298,8 @@
             this.useAssetLoadingViaTypetreeToolStripMenuItem.Name = "useAssetLoadingViaTypetreeToolStripMenuItem";
             this.useAssetLoadingViaTypetreeToolStripMenuItem.Size = new System.Drawing.Size(241, 22);
             this.useAssetLoadingViaTypetreeToolStripMenuItem.Text = "Parse assets using their typetree";
-            this.useAssetLoadingViaTypetreeToolStripMenuItem.ToolTipText = "(Applies to assets with typetree included). Slower but more correct parsing. Only" +
-    " for Texture2D and AnimationClip assets for now.";
+            this.useAssetLoadingViaTypetreeToolStripMenuItem.ToolTipText = "(Applies to assets with typetree included). Slower but can parse non-standard ass" +
+    "ets. Only for Texture2D, AnimationClip and Material assets for now.";
             this.useAssetLoadingViaTypetreeToolStripMenuItem.CheckedChanged += new System.EventHandler(this.useAssetLoadingViaTypetreeToolStripMenuItem_CheckedChanged);
             // 
             // assetLoadingToolStripSeparator
@@ -359,33 +362,59 @@
             // customCompressionTypeToolStripMenuItem
             // 
             this.customCompressionTypeToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.customCompressionZstdToolStripMenuItem,
-            this.customCompressionLZ4ToolStripMenuItem});
+            this.blockInfoCompressionToolStripMenuItem,
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem,
+            this.blockCompressionToolStripMenuItem,
+            this.customBlockCompressionComboBoxToolStripMenuItem});
             this.customCompressionTypeToolStripMenuItem.Name = "customCompressionTypeToolStripMenuItem";
             this.customCompressionTypeToolStripMenuItem.Size = new System.Drawing.Size(241, 22);
-            this.customCompressionTypeToolStripMenuItem.Text = "Custom compression type";
+            this.customCompressionTypeToolStripMenuItem.Text = "Bundle compression type";
             // 
-            // customCompressionZstdToolStripMenuItem
+            // blockInfoCompressionToolStripMenuItem
             // 
-            this.customCompressionZstdToolStripMenuItem.Checked = true;
-            this.customCompressionZstdToolStripMenuItem.CheckOnClick = true;
-            this.customCompressionZstdToolStripMenuItem.CheckState = System.Windows.Forms.CheckState.Checked;
-            this.customCompressionZstdToolStripMenuItem.Name = "customCompressionZstdToolStripMenuItem";
-            this.customCompressionZstdToolStripMenuItem.Size = new System.Drawing.Size(130, 22);
-            this.customCompressionZstdToolStripMenuItem.Text = "Zstd";
-            this.customCompressionZstdToolStripMenuItem.ToolTipText = "If selected, Zstd-decompression will be used for assets with custom compression t" +
-    "ype";
-            this.customCompressionZstdToolStripMenuItem.CheckedChanged += new System.EventHandler(this.customCompressionZstd_CheckedChanged);
+            this.blockInfoCompressionToolStripMenuItem.Enabled = false;
+            this.blockInfoCompressionToolStripMenuItem.Name = "blockInfoCompressionToolStripMenuItem";
+            this.blockInfoCompressionToolStripMenuItem.Size = new System.Drawing.Size(197, 22);
+            this.blockInfoCompressionToolStripMenuItem.Text = "BlockInfo Compression";
             // 
-            // customCompressionLZ4ToolStripMenuItem
+            // customBlockInfoCompressionComboBoxToolStripMenuItem
             // 
-            this.customCompressionLZ4ToolStripMenuItem.CheckOnClick = true;
-            this.customCompressionLZ4ToolStripMenuItem.Name = "customCompressionLZ4ToolStripMenuItem";
-            this.customCompressionLZ4ToolStripMenuItem.Size = new System.Drawing.Size(130, 22);
-            this.customCompressionLZ4ToolStripMenuItem.Text = "Lz4/Lz4HC";
-            this.customCompressionLZ4ToolStripMenuItem.ToolTipText = "If selected, Lz4-decompression will be used for assets with custom compression ty" +
-    "pe";
-            this.customCompressionLZ4ToolStripMenuItem.CheckedChanged += new System.EventHandler(this.customCompressionLZ4_CheckedChanged);
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem.DropDownHeight = 80;
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem.IntegralHeight = false;
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem.Items.AddRange(new object[] {
+            "Auto",
+            "Zstd",
+            "Oodle",
+            "Lz4/Lz4HC",
+            "Lzma"});
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem.Name = "customBlockInfoCompressionComboBoxToolStripMenuItem";
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem.Size = new System.Drawing.Size(100, 23);
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem.ToolTipText = "Selected compression type will override detected type from asset bundle";
+            this.customBlockInfoCompressionComboBoxToolStripMenuItem.SelectedIndexChanged += new System.EventHandler(this.customBlockInfoCompressionComboBoxToolStripMenuItem_SelectedIndexChanged);
+            // 
+            // blockCompressionToolStripMenuItem
+            // 
+            this.blockCompressionToolStripMenuItem.Enabled = false;
+            this.blockCompressionToolStripMenuItem.Name = "blockCompressionToolStripMenuItem";
+            this.blockCompressionToolStripMenuItem.Size = new System.Drawing.Size(197, 22);
+            this.blockCompressionToolStripMenuItem.Text = "Block Compression";
+            // 
+            // customBlockCompressionComboBoxToolStripMenuItem
+            // 
+            this.customBlockCompressionComboBoxToolStripMenuItem.DropDownHeight = 80;
+            this.customBlockCompressionComboBoxToolStripMenuItem.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.customBlockCompressionComboBoxToolStripMenuItem.IntegralHeight = false;
+            this.customBlockCompressionComboBoxToolStripMenuItem.Items.AddRange(new object[] {
+            "Auto",
+            "Zstd",
+            "Oodle",
+            "Lz4/Lz4HC",
+            "Lzma"});
+            this.customBlockCompressionComboBoxToolStripMenuItem.Name = "customBlockCompressionComboBoxToolStripMenuItem";
+            this.customBlockCompressionComboBoxToolStripMenuItem.Size = new System.Drawing.Size(100, 23);
+            this.customBlockCompressionComboBoxToolStripMenuItem.ToolTipText = "Selected compression type will override detected type from asset bundle";
+            this.customBlockCompressionComboBoxToolStripMenuItem.SelectedIndexChanged += new System.EventHandler(this.customBlockCompressionComboBoxToolStripMenuItem_SelectedIndexChanged);
             // 
             // toolStripMenuItem14
             // 
@@ -813,6 +842,7 @@
             // 
             // tabPage1
             // 
+            this.tabPage1.Controls.Add(this.sceneExactSearchCheckBox);
             this.tabPage1.Controls.Add(this.sceneTreeView);
             this.tabPage1.Controls.Add(this.treeSearch);
             this.tabPage1.Location = new System.Drawing.Point(4, 22);
@@ -821,6 +851,21 @@
             this.tabPage1.TabIndex = 0;
             this.tabPage1.Text = "Scene Hierarchy";
             this.tabPage1.UseVisualStyleBackColor = true;
+            // 
+            // sceneExactSearchCheckBox
+            // 
+            this.sceneExactSearchCheckBox.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.sceneExactSearchCheckBox.AutoSize = true;
+            this.sceneExactSearchCheckBox.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.sceneExactSearchCheckBox.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.sceneExactSearchCheckBox.Location = new System.Drawing.Point(384, 2);
+            this.sceneExactSearchCheckBox.Name = "sceneExactSearchCheckBox";
+            this.sceneExactSearchCheckBox.Size = new System.Drawing.Size(85, 17);
+            this.sceneExactSearchCheckBox.TabIndex = 2;
+            this.sceneExactSearchCheckBox.Text = "Exact search";
+            this.sceneExactSearchCheckBox.UseVisualStyleBackColor = true;
+            this.sceneExactSearchCheckBox.CheckedChanged += new System.EventHandler(this.sceneExactSearchCheckBox_CheckedChanged);
             // 
             // sceneTreeView
             // 
@@ -832,7 +877,7 @@
             this.sceneTreeView.Location = new System.Drawing.Point(0, 20);
             this.sceneTreeView.Name = "sceneTreeView";
             this.sceneTreeView.Size = new System.Drawing.Size(472, 587);
-            this.sceneTreeView.TabIndex = 1;
+            this.sceneTreeView.TabIndex = 0;
             this.sceneTreeView.AfterCheck += new System.Windows.Forms.TreeViewEventHandler(this.sceneTreeView_AfterCheck);
             this.sceneTreeView.NodeMouseClick += new System.Windows.Forms.TreeNodeMouseClickEventHandler(this.sceneTreeView_NodeMouseClick);
             // 
@@ -843,7 +888,7 @@
             this.treeSearch.Location = new System.Drawing.Point(0, 0);
             this.treeSearch.Name = "treeSearch";
             this.treeSearch.Size = new System.Drawing.Size(472, 20);
-            this.treeSearch.TabIndex = 2;
+            this.treeSearch.TabIndex = 1;
             this.treeSearch.Text = " Search ";
             this.treeSearch.TextChanged += new System.EventHandler(this.treeSearch_TextChanged);
             this.treeSearch.Enter += new System.EventHandler(this.treeSearch_Enter);
@@ -877,7 +922,7 @@
             this.assetListView.Location = new System.Drawing.Point(0, 23);
             this.assetListView.Name = "assetListView";
             this.assetListView.Size = new System.Drawing.Size(472, 584);
-            this.assetListView.TabIndex = 1;
+            this.assetListView.TabIndex = 0;
             this.assetListView.UseCompatibleStateImageBehavior = false;
             this.assetListView.View = System.Windows.Forms.View.Details;
             this.assetListView.VirtualMode = true;
@@ -937,7 +982,7 @@
             this.listSearch.Name = "listSearch";
             this.listSearch.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.None;
             this.listSearch.Size = new System.Drawing.Size(331, 16);
-            this.listSearch.TabIndex = 3;
+            this.listSearch.TabIndex = 1;
             this.listSearch.Text = " Filter ";
             this.listSearch.WordWrap = false;
             this.listSearch.TextChanged += new System.EventHandler(this.ListSearchTextChanged);
@@ -971,7 +1016,7 @@
             this.listSearchFilterMode.Location = new System.Drawing.Point(351, 0);
             this.listSearchFilterMode.Name = "listSearchFilterMode";
             this.listSearchFilterMode.Size = new System.Drawing.Size(121, 21);
-            this.listSearchFilterMode.TabIndex = 3;
+            this.listSearchFilterMode.TabIndex = 2;
             this.listSearchFilterMode.SelectedIndexChanged += new System.EventHandler(this.listSearchFilterMode_SelectedIndexChanged);
             // 
             // tabPage3
@@ -1746,8 +1791,6 @@
         private System.Windows.Forms.ToolStripMenuItem l2DModelWithFadeListToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem exportL2DWithFadeLstToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem customCompressionTypeToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem customCompressionZstdToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem customCompressionLZ4ToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem useAssetLoadingViaTypetreeToolStripMenuItem;
         private System.Windows.Forms.ToolStripSeparator assetLoadingToolStripSeparator;
         private System.Windows.Forms.TreeView dumpTreeView;
@@ -1763,6 +1806,11 @@
         private System.Windows.Forms.ToolStripMenuItem colorThemeDarkToolStripMenuItem;
         private System.Windows.Forms.Label FMODaudioChannelsLabel;
         private System.Windows.Forms.ToolStripMenuItem autoPlayAudioAssetsToolStripMenuItem;
+        private System.Windows.Forms.ToolStripComboBox customBlockCompressionComboBoxToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem blockCompressionToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem blockInfoCompressionToolStripMenuItem;
+        private System.Windows.Forms.ToolStripComboBox customBlockInfoCompressionComboBoxToolStripMenuItem;
+        private System.Windows.Forms.CheckBox sceneExactSearchCheckBox;
     }
 }
 

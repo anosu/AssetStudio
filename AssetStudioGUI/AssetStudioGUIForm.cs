@@ -145,6 +145,8 @@ namespace AssetStudioGUI
             useAssetLoadingViaTypetreeToolStripMenuItem.Checked = Properties.Settings.Default.useTypetreeLoading;
             useDumpTreeViewToolStripMenuItem.Checked = Properties.Settings.Default.useDumpTreeView;
             autoPlayAudioAssetsToolStripMenuItem.Checked = Properties.Settings.Default.autoplayAudio;
+            customBlockCompressionComboBoxToolStripMenuItem.SelectedIndex = 0;
+            customBlockInfoCompressionComboBoxToolStripMenuItem.SelectedIndex = 0;
             FMODinit();
             listSearchFilterMode.SelectedIndex = 0;
             if (string.IsNullOrEmpty(Properties.Settings.Default.fbxSettings))
@@ -614,9 +616,10 @@ namespace AssetStudioGUI
             {
                 if (treeSrcResults.Count == 0)
                 {
+                    var isExactSearch = sceneExactSearchCheckBox.Checked;
                     foreach (TreeNode node in sceneTreeView.Nodes)
                     {
-                        TreeNodeSearch(node);
+                        TreeNodeSearch(node, isExactSearch);
                     }
                 }
                 if (treeSrcResults.Count > 0)
@@ -632,17 +635,26 @@ namespace AssetStudioGUI
             }
         }
 
-        private void TreeNodeSearch(TreeNode treeNode)
+        private void TreeNodeSearch(TreeNode treeNode, bool isExactSearch)
         {
-            if (treeNode.Text.IndexOf(treeSearch.Text, StringComparison.OrdinalIgnoreCase) >= 0)
+            if (isExactSearch && string.Equals(treeNode.Text, treeSearch.Text, StringComparison.InvariantCultureIgnoreCase))
+            {
+                treeSrcResults.Add(treeNode);
+            }
+            else if (!isExactSearch && treeNode.Text.IndexOf(treeSearch.Text, StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 treeSrcResults.Add(treeNode);
             }
 
             foreach (TreeNode node in treeNode.Nodes)
             {
-                TreeNodeSearch(node);
+                TreeNodeSearch(node, isExactSearch);
             }
+        }
+
+        private void sceneExactSearchCheckBox_CheckedChanged(object sender, EventArgs e)
+        {
+            treeSearch_TextChanged(sender, e);
         }
 
         private void sceneTreeView_AfterCheck(object sender, TreeViewEventArgs e)
@@ -1111,8 +1123,8 @@ namespace AssetStudioGUI
                 }
             }
             soundBuff = BigArrayPool<byte>.Shared.Rent(m_AudioClip.m_AudioData.Size);
-            m_AudioClip.m_AudioData.GetData(soundBuff, out var read);
-            if (read <= 0)
+            var dataLen = m_AudioClip.m_AudioData.GetData(soundBuff);
+            if (dataLen <= 0)
                 return;
 
             var exinfo = new FMOD.CREATESOUNDEXINFO();
@@ -1253,6 +1265,7 @@ namespace AssetStudioGUI
                     sb.AppendLine($"Pixel Per Unit: {cubismMoc.PixelPerUnit}");
                     sb.AppendLine($"Parameter Count: {cubismMoc.ParamCount}");
                     sb.AppendLine($"Part Count: {cubismMoc.PartCount}");
+                    sb.AppendLine($"Pre-linked AnimationClips: {model?.ClipMotionList.Count}");
                 }
                 assetItem.InfoText = sb.ToString();
             }
@@ -1538,6 +1551,9 @@ namespace AssetStudioGUI
 
         private void ResetForm()
         {
+            if (Studio.assetsManager.assetsFileList.Count > 0)
+                Logger.Info("Resetting program...");
+
             Text = guiTitle;
             Studio.assetsManager.Clear();
             Studio.assemblyLoader.Clear();
@@ -2422,16 +2438,50 @@ namespace AssetStudioGUI
             }
         }
 
-        private void customCompressionZstd_CheckedChanged(object sender, EventArgs e)
+        private void customBlockCompressionComboBoxToolStripMenuItem_SelectedIndexChanged(object sender, EventArgs e)
         {
-            customCompressionLZ4ToolStripMenuItem.Checked = !customCompressionZstdToolStripMenuItem.Checked;
-            assetsManager.ZstdEnabled = customCompressionZstdToolStripMenuItem.Checked;
+            var selectedTypeIndex = customBlockCompressionComboBoxToolStripMenuItem.SelectedIndex;
+            switch (selectedTypeIndex)
+            {
+                case 0:
+                    assetsManager.CustomBlockCompression = CompressionType.Auto;
+                    break;
+                case 1:
+                    assetsManager.CustomBlockCompression = CompressionType.Zstd;
+                    break;
+                case 2:
+                    assetsManager.CustomBlockCompression = CompressionType.Oodle;
+                    break;
+                case 3:
+                    assetsManager.CustomBlockCompression = CompressionType.Lz4HC;
+                    break;
+                case 4:
+                    assetsManager.CustomBlockCompression = CompressionType.Lzma;
+                    break;
+            }
         }
 
-        private void customCompressionLZ4_CheckedChanged(object sender, EventArgs e)
+        private void customBlockInfoCompressionComboBoxToolStripMenuItem_SelectedIndexChanged(object sender, EventArgs e)
         {
-            customCompressionZstdToolStripMenuItem.Checked = !customCompressionLZ4ToolStripMenuItem.Checked;
-            assetsManager.ZstdEnabled = customCompressionZstdToolStripMenuItem.Checked;
+            var selectedTypeIndex = customBlockInfoCompressionComboBoxToolStripMenuItem.SelectedIndex;
+            switch (selectedTypeIndex)
+            {
+                case 0:
+                    assetsManager.CustomBlockInfoCompression = CompressionType.Auto;
+                    break;
+                case 1:
+                    assetsManager.CustomBlockInfoCompression = CompressionType.Zstd;
+                    break;
+                case 2:
+                    assetsManager.CustomBlockInfoCompression = CompressionType.Oodle;
+                    break;
+                case 3:
+                    assetsManager.CustomBlockInfoCompression = CompressionType.Lz4HC;
+                    break;
+                case 4:
+                    assetsManager.CustomBlockInfoCompression = CompressionType.Lzma;
+                    break;
+            }
         }
 
         private void useAssetLoadingViaTypetreeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
