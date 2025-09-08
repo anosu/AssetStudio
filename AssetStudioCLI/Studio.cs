@@ -30,6 +30,12 @@ namespace AssetStudioCLI
         {
             Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("en-US");
             Progress.Default = new Progress<int>(ShowCurProgressValue);
+            assetsManager.LoadViaTypeTree = !CLIOptions.f_avoidLoadingViaTypetree.Value;
+            assetsManager.Options.CustomUnityVersion = CLIOptions.o_unityVersion.Value;
+            assetsManager.Options.BundleOptions.CustomBlockInfoCompression = CLIOptions.o_bundleBlockInfoCompression.Value;
+            assetsManager.Options.BundleOptions.CustomBlockCompression = CLIOptions.o_bundleBlockCompression.Value;
+            assetsManager.Options.BundleOptions.DecompressToDisk = CLIOptions.f_decompressToDisk.Value;
+            assetsManager.OptionLoaders.Clear();
         }
 
         private static void ShowCurProgressValue(int value)
@@ -94,13 +100,13 @@ namespace AssetStudioCLI
             var count = 0;
             var bundleStream = new OffsetStream(reader);
             var bundleReader = new FileReader(reader.FullPath, bundleStream);
-            var bundleFile = new BundleFile(bundleReader, assetsManager.CustomBlockInfoCompression, assetsManager.CustomBlockCompression, assetsManager.SpecifyUnityVersion);
+            var bundleFile = new BundleFile(bundleReader, assetsManager.Options.BundleOptions);
             var extractPath = Path.Combine(savePath, reader.FileName + "_unpacked");
-            if (bundleFile.fileList.Length > 0)
+            if (bundleFile.fileList.Count > 0)
             {
                 count += ExtractStreamFile(extractPath, bundleFile.fileList);
             }
-            while (bundleFile.IsMultiBundle)
+            while (bundleFile.IsDataAfterBundle)
             {
                 bundleStream.Offset = reader.Position;
                 bundleReader = new FileReader($"{reader.FullPath}_0x{bundleStream.Offset:X}", bundleStream);
@@ -113,8 +119,8 @@ namespace AssetStudioCLI
                     bundleReader.FileName = $"{reader.FileName}_0x{bundleStream.Offset:X}";
                 }
                 Logger.Info($"[MultiBundle] Decompressing \"{reader.FileName}\" from offset: 0x{bundleStream.Offset:X}..");
-                bundleFile = new BundleFile(bundleReader, assetsManager.CustomBlockInfoCompression, assetsManager.CustomBlockCompression, assetsManager.SpecifyUnityVersion);
-                if (bundleFile.fileList.Length > 0)
+                bundleFile = new BundleFile(bundleReader, assetsManager.Options.BundleOptions, isMultiBundle: true);
+                if (bundleFile.fileList.Count > 0)
                 {
                     count += ExtractStreamFile(extractPath, bundleFile.fileList);
                 }
@@ -128,19 +134,21 @@ namespace AssetStudioCLI
             Logger.Info($"Decompressing {reader.FileName} ...");
             var webFile = new WebFile(reader);
             reader.Dispose();
-            if (webFile.fileList.Length > 0)
+            if (webFile.fileList.Count > 0)
             {
                 var extractPath = Path.Combine(savePath, reader.FileName + "_unpacked");
-                return ExtractStreamFile(extractPath, webFile.fileList);
+                return ExtractStreamFile(extractPath, webFile.fileList, isOffsetStream: false);
             }
             return 0;
         }
 
-        private static int ExtractStreamFile(string extractPath, StreamFile[] fileList)
+        private static int ExtractStreamFile(string extractPath, List<StreamFile> fileList, bool isOffsetStream = true)
         {
             var extractedCount = 0;
             foreach (var file in fileList)
             {
+                if (file.stream == null)
+                    continue;
                 var filePath = Path.Combine(extractPath, file.path);
                 var fileDirectory = Path.GetDirectoryName(filePath);
                 if (!Directory.Exists(fileDirectory))
@@ -151,11 +159,16 @@ namespace AssetStudioCLI
                 {
                     using (var fileStream = File.Create(filePath))
                     {
-                        file.stream.CopyTo(fileStream);
+                        file.stream.Position = 0;
+                        file.stream.CopyTo(fileStream, file.stream.Length);
                     }
-                    extractedCount += 1;
+                    extractedCount++;
                 }
-                file.stream.Dispose();
+                if (!isOffsetStream) file.stream.Dispose();
+            }
+            if (isOffsetStream && fileList.Count > 0)
+            {
+                fileList[0].stream?.Dispose();
             }
             return extractedCount;
         }
@@ -163,16 +176,13 @@ namespace AssetStudioCLI
         public static bool LoadAssets()
         {
             var isLoaded = false;
-            assetsManager.SpecifyUnityVersion = CLIOptions.o_unityVersion.Value;
-            assetsManager.CustomBlockInfoCompression = CLIOptions.o_bundleBlockInfoCompression.Value;
-            assetsManager.CustomBlockCompression = CLIOptions.o_bundleBlockCompression.Value;
-            assetsManager.LoadingViaTypeTreeEnabled = !CLIOptions.f_avoidLoadingViaTypetree.Value;
+            
             if (!CLIOptions.f_loadAllAssets.Value)
             {
                 assetsManager.SetAssetFilter(CLIOptions.o_exportAssetTypes.Value);
             }
             assetsManager.LoadFilesAndFolders(out _, CLIOptions.inputPathList);
-            if (assetsManager.assetsFileList.Count == 0)
+            if (assetsManager.AssetsFileList.Count == 0)
             {
                 Logger.Warning("No Unity file can be loaded.");
             }
@@ -190,15 +200,15 @@ namespace AssetStudioCLI
 
             var fileAssetsList = new List<AssetItem>();
             var tex2dArrayAssetList = new List<AssetItem>();
-            var objectCount = assetsManager.assetsFileList.Sum(x => x.Objects.Count);
+            var objectCount = assetsManager.AssetsFileList.Sum(x => x.Objects.Count);
             var objectAssetItemDic = new Dictionary<AssetStudio.Object, AssetItem>(objectCount);
             var isL2dMode = CLIOptions.o_workMode.Value == WorkMode.Live2D;
 
             Progress.Reset();
             var i = 0;
-            foreach (var assetsFile in assetsManager.assetsFileList)
+            foreach (var assetsFile in assetsManager.AssetsFileList)
             {
-                var preloadTable = Array.Empty<PPtr<AssetStudio.Object>>();
+                var preloadTable = new List<PPtr<AssetStudio.Object>>();
                 foreach (var asset in assetsFile.Objects)
                 {
                     var assetItem = new AssetItem(asset);
@@ -221,7 +231,7 @@ namespace AssetStudioCLI
                             foreach (var m_Container in m_AssetBundle.m_Container)
                             {
                                 var preloadIndex = m_Container.Value.preloadIndex;
-                                var preloadSize = isStreamedSceneAssetBundle ? preloadTable.Length : m_Container.Value.preloadSize;
+                                var preloadSize = isStreamedSceneAssetBundle ? preloadTable.Count : m_Container.Value.preloadSize;
                                 var preloadEnd = preloadIndex + preloadSize;
                                 for (var k = preloadIndex; k < preloadEnd; k++)
                                 {
@@ -363,21 +373,21 @@ namespace AssetStudioCLI
                 BuildTreeStructure(objectAssetItemDic);
             }
 
-            var log = $"Finished loading {assetsManager.assetsFileList.Count} files with {parsedAssetsList.Count} exportable assets";
-            var unityVer = assetsManager.assetsFileList[0].version;
+            var log = $"Finished loading {assetsManager.AssetsFileList.Count} files with {parsedAssetsList.Count} exportable assets";
+            var unityVer = assetsManager.AssetsFileList[0].version;
             long m_ObjectsCount;
             if (unityVer > 2020)
             {
-                m_ObjectsCount = assetsManager.assetsFileList.Sum(x => x.m_Objects.LongCount(y =>
+                m_ObjectsCount = assetsManager.AssetsFileList.Sum(x => x.m_Objects.LongCount(y =>
                     y.classID != (int)ClassIDType.Shader
                     && CLIOptions.o_exportAssetTypes.Value.Any(k => (int)k == y.classID))
                 );
             }
             else
             {
-                m_ObjectsCount = assetsManager.assetsFileList.Sum(x => x.m_Objects.LongCount(y => CLIOptions.o_exportAssetTypes.Value.Any(k => (int)k == y.classID)));
+                m_ObjectsCount = assetsManager.AssetsFileList.Sum(x => x.m_Objects.LongCount(y => CLIOptions.o_exportAssetTypes.Value.Any(k => (int)k == y.classID)));
             }
-            var objectsCount = assetsManager.assetsFileList.Sum(x => x.Objects.LongCount(y => CLIOptions.o_exportAssetTypes.Value.Any(k => k == y.type)));
+            var objectsCount = assetsManager.AssetsFileList.Sum(x => x.Objects.LongCount(y => CLIOptions.o_exportAssetTypes.Value.Any(k => k == y.type)));
             if (m_ObjectsCount != objectsCount)
             {
                 log += $" and {m_ObjectsCount - objectsCount} assets failed to read";
@@ -390,10 +400,10 @@ namespace AssetStudioCLI
             Logger.Info("Building tree structure...");
 
             var treeNodeDictionary = new Dictionary<GameObject, GameObjectNode>();
-            var assetsFileCount = assetsManager.assetsFileList.Count;
+            var assetsFileCount = assetsManager.AssetsFileList.Count;
             int j = 0;
             Progress.Reset();
-            foreach (var assetsFile in assetsManager.assetsFileList)
+            foreach (var assetsFile in assetsManager.AssetsFileList)
             {
                 var fileNode = new BaseNode(assetsFile.fileName);  //RootNode
 
@@ -481,9 +491,12 @@ namespace AssetStudioCLI
         public static void ShowExportableAssetsInfo()
         {
             var exportableAssetsCountDict = new Dictionary<ClassIDType, int>();
-            string info = "";
+            var info = "======";
             if (parsedAssetsList.Count > 0)
             {
+                info += $"\n\n[Unity Version]" +
+                        $"\n# {parsedAssetsList[0].Asset.version}";
+
                 foreach (var asset in parsedAssetsList)
                 {
                     if (exportableAssetsCountDict.ContainsKey(asset.Type))
@@ -496,15 +509,17 @@ namespace AssetStudioCLI
                     }
                 }
 
-                info += "\n[Exportable Assets Count]\n";
+                info += "\n\n[Exportable Assets Count]";
                 foreach (var assetType in exportableAssetsCountDict.Keys)
                 {
-                    info += $"# {assetType}: {exportableAssetsCountDict[assetType]}\n";
+                    info += $"\n# {assetType}: {exportableAssetsCountDict[assetType]}";
                 }
                 if (exportableAssetsCountDict.Count > 1)
                 {
-                    info += $"#\n# Total: {parsedAssetsList.Count} assets";
+                    info += $"\n#\n# Total: {parsedAssetsList.Count} assets";
                 }
+
+                info += $"\n\n# Exportable Live2D Models: {l2dModelDict.Count}";
             }
             else
             {
@@ -751,6 +766,7 @@ namespace AssetStudioCLI
                 }
                 Console.Write($"Exported [{exportedCount}/{toExportCount}]\r");
             }
+            Exporter.ClearHash();
 
             Parallel.ForEach(toParallelExportAssetDict, new ParallelOptions { MaxDegreeOfParallelism = parallelExportCount }, toExportAsset =>
             {
@@ -1291,6 +1307,12 @@ namespace AssetStudioCLI
                 $"Finished exporting [{modelCounter}/{totalModelCount}] Live2D model(s) to \"{CLIOptions.o_outputFolder.Value.Color(Ansi.BrightCyan)}\"" :
                 "Nothing exported.";
             Logger.Default.Log(LoggerEvent.Info, status, ignoreLevel: true);
+        }
+
+        public static void Clear()
+        {
+            assetsManager.Clear();
+            assemblyLoader.Clear();
         }
     }
 }

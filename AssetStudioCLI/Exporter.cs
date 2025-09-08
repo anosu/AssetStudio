@@ -10,10 +10,13 @@ namespace AssetStudioCLI
 {
     internal static class Exporter
     {
+        private static readonly HashSet<string> ExportPathHashSet = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+
         private static bool TryExportFile(string dir, AssetItem item, string extension, out string fullPath, string mode = "Export")
         {
             var fileName = FixFileName(item.Text);
             var filenameFormat = CLIOptions.o_filenameFormat.Value;
+            var canOverwrite = CLIOptions.f_overwriteExisting.Value;
             switch (filenameFormat)
             {
                 case FilenameFormat.AssetName_PathID:
@@ -24,22 +27,31 @@ namespace AssetStudioCLI
                     break;
             }
             fullPath = Path.Combine(dir, fileName + extension);
-            if (!File.Exists(fullPath))
+            if (ExportPathHashSet.Add(fullPath))
             {
-                Directory.CreateDirectory(dir);
-                return true;
+                if (CanWrite(fullPath, dir, canOverwrite))
+                {
+                    return true;
+                }
             }
-            if (filenameFormat == FilenameFormat.AssetName)
+            else if (filenameFormat == FilenameFormat.AssetName)
             {
                 fullPath = Path.Combine(dir, fileName + item.UniqueID + extension);
-                if (!File.Exists(fullPath))
+                if (CanWrite(fullPath, dir, canOverwrite))
                 {
-                    Directory.CreateDirectory(dir);
                     return true;
                 }
             }
             Logger.Error($"{mode} error. File \"{fullPath.Color(ColorConsole.BrightRed)}\" already exist");
             return false;
+        }
+
+        private static bool CanWrite(string fullPath, string dir, bool canOverwrite)
+        {
+            if (!canOverwrite && File.Exists(fullPath))
+                return false;
+            Directory.CreateDirectory(dir);
+            return true;
         }
 
         private static bool ExportVideoClip(AssetItem item, string exportPath)
@@ -95,19 +107,18 @@ namespace AssetStudioCLI
         {
             var m_TextAsset = (TextAsset)item.Asset;
             var extension = ".txt";
-            var assetExtension = Path.GetExtension(m_TextAsset.m_Name);
             if (!CLIOptions.f_notRestoreExtensionName.Value)
             {
-                if (!string.IsNullOrEmpty(assetExtension))
+                if (Path.HasExtension(m_TextAsset.m_Name))
                 {
                     extension = "";
                 }
-                else if (!string.IsNullOrEmpty(item.Container))
+                else
                 {
-                    var ext = Path.GetExtension(item.Container);
-                    if (!string.IsNullOrEmpty(item.Container))
+                    var extFromContainer = Path.GetExtension(item.Container);
+                    if (!string.IsNullOrEmpty(extFromContainer))
                     {
-                        extension = ext;
+                        extension = extFromContainer;
                     }
                 }
             }
@@ -164,15 +175,17 @@ namespace AssetStudioCLI
         private static bool ExportMesh(AssetItem item, string exportPath)
         {
             var m_Mesh = (Mesh)item.Asset;
+            m_Mesh.ProcessData();
+
             if (m_Mesh.m_VertexCount <= 0)
                 return false;
             if (!TryExportFile(exportPath, item, ".obj", out var exportFullPath))
                 return false;
+
             var sb = new StringBuilder();
             sb.AppendLine("g " + m_Mesh.m_Name);
 
             #region Vertices
-
             if (m_Mesh.m_Vertices == null || m_Mesh.m_Vertices.Length == 0)
             {
                 return false;
@@ -188,11 +201,9 @@ namespace AssetStudioCLI
             {
                 sb.Append($"v {-m_Mesh.m_Vertices[v * c]} {m_Mesh.m_Vertices[v * c + 1]} {m_Mesh.m_Vertices[v * c + 2]}\r\n");
             }
-
             #endregion
 
             #region UV
-
             if (m_Mesh.m_UV0?.Length > 0)
             {
                 c = 4;
@@ -210,11 +221,9 @@ namespace AssetStudioCLI
                     sb.AppendFormat("vt {0} {1}\r\n", m_Mesh.m_UV0[v * c], m_Mesh.m_UV0[v * c + 1]);
                 }
             }
-
             #endregion
 
             #region Normals
-
             if (m_Mesh.m_Normals?.Length > 0)
             {
                 if (m_Mesh.m_Normals.Length == m_Mesh.m_VertexCount * 3)
@@ -231,13 +240,11 @@ namespace AssetStudioCLI
                     sb.AppendFormat("vn {0} {1} {2}\r\n", -m_Mesh.m_Normals[v * c], m_Mesh.m_Normals[v * c + 1], m_Mesh.m_Normals[v * c + 2]);
                 }
             }
-
             #endregion
 
             #region Face
-
             int sum = 0;
-            for (var i = 0; i < m_Mesh.m_SubMeshes.Length; i++)
+            for (var i = 0; i < m_Mesh.m_SubMeshes.Count; i++)
             {
                 sb.AppendLine($"g {m_Mesh.m_Name}_{i}");
                 int indexCount = (int)m_Mesh.m_SubMeshes[i].indexCount;
@@ -249,7 +256,6 @@ namespace AssetStudioCLI
 
                 sum = end;
             }
-
             #endregion
 
             sb.Replace("NaN", "0");
@@ -267,7 +273,7 @@ namespace AssetStudioCLI
             }
             var m_Animator = (Animator)item.Asset;
             var convert = animationList != null
-                ? new ModelConverter(m_Animator, CLIOptions.o_imageFormat.Value, animationList.Select(x => (AnimationClip)x.Asset).ToArray())
+                ? new ModelConverter(m_Animator, CLIOptions.o_imageFormat.Value, animationList.Select(x => (AnimationClip)x.Asset).ToList())
                 : new ModelConverter(m_Animator, CLIOptions.o_imageFormat.Value);
             ExportFbx(convert, exportFullPath);
             return true;
@@ -370,7 +376,7 @@ namespace AssetStudioCLI
         public static void ExportGameObject(GameObject gameObject, string exportPath, List<AssetItem> animationList = null)
         {
             var convert = animationList != null
-                ? new ModelConverter(gameObject, CLIOptions.o_imageFormat.Value, animationList.Select(x => (AnimationClip)x.Asset).ToArray())
+                ? new ModelConverter(gameObject, CLIOptions.o_imageFormat.Value, animationList.Select(x => (AnimationClip)x.Asset).ToList())
                 : new ModelConverter(gameObject, CLIOptions.o_imageFormat.Value);
             var modelName = FixFileName(gameObject.m_Name);
             var exportFullPath = Path.Combine(exportPath, "FBX_GameObjects", modelName, modelName + ".fbx");
@@ -386,6 +392,11 @@ namespace AssetStudioCLI
             return str.Length >= 260
                 ? Path.GetRandomFileName()
                 : Path.GetInvalidFileNameChars().Aggregate(str, (current, c) => current.Replace(c, '_'));
+        }
+
+        public static void ClearHash()
+        {
+            ExportPathHashSet.Clear();
         }
     }
 }

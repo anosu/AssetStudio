@@ -1,4 +1,6 @@
-﻿namespace AssetStudio
+﻿using System.Collections.Generic;
+
+namespace AssetStudio
 {
     public class StaticBatchInfo
     {
@@ -14,7 +16,7 @@
 
     public abstract class Renderer : Component
     {
-        public PPtr<Material>[] m_Materials;
+        public List<PPtr<Material>> m_Materials;
         public StaticBatchInfo m_StaticBatchInfo;
         public uint[] m_SubsetIndices;
 
@@ -57,10 +59,14 @@
                     {
                         var m_virtualGeometry = reader.ReadByte();
                         var m_virtualGeometryShadow = reader.ReadByte();
-                        if (version >= (2022, 3, 48)) //2022.3.48t3(1.4.0) and up
+                        if (version > (2022, 3, 48) || (version == (2022, 3, 48) && version.Build >= 3)) //2022.3.48t3(1.4.0) and up
                         {
                             reader.AlignStream();
                             var m_ShadingRate = reader.ReadByte();
+                            if (version >= (2022, 3, 61)) //2022.3.61t1(1.6.0) and up
+                            {
+                                var m_ForceDisableGRD = reader.ReadByte();
+                            }
                         }
                     }
                     if (version >= (2023, 2)) //2023.2 and up
@@ -108,10 +114,10 @@
             }
 
             var m_MaterialsSize = reader.ReadInt32();
-            m_Materials = new PPtr<Material>[m_MaterialsSize];
-            for (int i = 0; i < m_MaterialsSize; i++)
+            m_Materials = new List<PPtr<Material>>();
+            for (var i = 0; i < m_MaterialsSize; i++)
             {
-                m_Materials[i] = new PPtr<Material>(reader);
+                m_Materials.Add(new PPtr<Material>(reader));
             }
 
             if (version < 3) //3.0 down

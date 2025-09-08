@@ -93,7 +93,8 @@ namespace AssetStudioCLI.Options
         public static Option<AssetGroupOption> o_groupAssetsBy;
         public static Option<FilenameFormat> o_filenameFormat;
         public static Option<string> o_outputFolder;
-        public static Option<bool> o_displayHelp;
+        public static Option<bool> f_overwriteExisting;
+        public static Option<bool> f_displayHelp;
         //logger
         public static Option<LoggerEvent> o_logLevel;
         public static Option<LogOutputMode> o_logOutput;
@@ -124,6 +125,7 @@ namespace AssetStudioCLI.Options
         public static Option<ExportListType> o_exportAssetList;
         public static Option<string> o_assemblyPath;
         public static Option<UnityVersion> o_unityVersion;
+        public static Option<bool> f_decompressToDisk;
         public static Option<bool> f_notRestoreExtensionName;
         public static Option<bool> f_avoidLoadingViaTypetree;
         public static Option<bool> f_loadAllAssets;
@@ -253,13 +255,23 @@ namespace AssetStudioCLI.Options
                 optionExample: "",
                 optionHelpGroup: HelpGroups.General
             );
-            o_displayHelp = new GroupedOption<bool>
+            f_overwriteExisting = new GroupedOption<bool>
+            (
+                optionDefaultValue: false,
+                optionName: "-r, --overwrite-existing",
+                optionDescription: "(Flag) If specified, Studio will overwrite existing files during asset export/dump\n",
+                optionExample: "",
+                optionHelpGroup: HelpGroups.General,
+                isFlag: true
+            );
+            f_displayHelp = new GroupedOption<bool>
             (
                 optionDefaultValue: false,
                 optionName: "-h, --help",
                 optionDescription: "Display help and exit",
                 optionExample: "",
-                optionHelpGroup: HelpGroups.General
+                optionHelpGroup: HelpGroups.General,
+                isFlag: true
             );
             #endregion
 
@@ -385,7 +397,7 @@ namespace AssetStudioCLI.Options
                     "Auto - Search for model-related animations and export model with them\n" +
                     "Skip - Don't export animations\n" +
                     "All - Try to bind all loaded animations to each loaded model\n",
-                optionExample: "--fbx-animation skip\n",
+                optionExample: "Example: \"--fbx-animation skip\"\n",
                 optionHelpGroup: HelpGroups.FBX
             );
             f_fbxUvsAsDiffuseMaps = new GroupedOption<bool>
@@ -518,6 +530,15 @@ namespace AssetStudioCLI.Options
                 optionExample: "Example: \"--unity-version 2017.4.39f1\"\n",
                 optionHelpGroup: HelpGroups.Advanced
             );
+            f_decompressToDisk = new GroupedOption<bool>
+            (
+                optionDefaultValue: false,
+                optionName: "--decompress-to-disk",
+                optionDescription: "(Flag) If not specified, only bundles larger than 2GB will be decompressed to disk\ninstead of RAM\n",
+                optionExample: "",
+                optionHelpGroup: HelpGroups.Advanced,
+                isFlag: true
+            );
             f_notRestoreExtensionName = new GroupedOption<bool>
             (
                 optionDefaultValue: false,
@@ -530,7 +551,7 @@ namespace AssetStudioCLI.Options
             f_avoidLoadingViaTypetree = new GroupedOption<bool>
             (
                 optionDefaultValue: false,
-                optionName: "--avoid-typetree-loading",
+                optionName: "--ignore-typetree",
                 optionDescription: "(Flag) If specified, Studio will not try to parse assets at load time\nusing their type tree\n",
                 optionExample: "",
                 optionHelpGroup: HelpGroups.Advanced,
@@ -557,7 +578,7 @@ namespace AssetStudioCLI.Options
 
             if (args.Length == 0 || args.Any(x => x.ToLower() == "-h" || x.ToLower() == "--help" || x.ToLower() == "-?"))
             {
-                o_displayHelp.Value = true;
+                f_displayHelp.Value = true;
                 return;
             }
 
@@ -626,6 +647,7 @@ namespace AssetStudioCLI.Options
                         break;
                     case "info":
                         o_workMode.Value = WorkMode.Info;
+                        o_exportAssetTypes.Value.Add(ClassIDType.Animator);
                         break;
                     case "l2d":
                     case "live2d":
@@ -661,12 +683,18 @@ namespace AssetStudioCLI.Options
             #endregion
 
             #region Parse Flags
-            for (var i = 0; i < processedArgs.Count; i++) 
+            var flagIndexes = new List<int>();
+            for (var i = 0; i < processedArgs.Count; i++)
             {
                 var flag = processedArgs[i].ToLower();
 
-                switch(flag)
+                switch (flag)
                 {
+                    case "-r":
+                    case "--overwrite-existing":
+                        f_overwriteExisting.Value = true;
+                        flagIndexes.Add(i);
+                        break;
                     case "--l2d-search-by-filename":
                         if (o_workMode.Value != WorkMode.Live2D)
                         {
@@ -675,7 +703,7 @@ namespace AssetStudioCLI.Options
                             return;
                         }
                         f_l2dAssetSearchByFilename.Value = true;
-                        processedArgs.RemoveAt(i);
+                        flagIndexes.Add(i);
                         break;
                     case "--l2d-force-bezier":
                         if (o_workMode.Value != WorkMode.Live2D)
@@ -685,7 +713,7 @@ namespace AssetStudioCLI.Options
                             return;
                         }
                         f_l2dForceBezier.Value = true;
-                        processedArgs.RemoveAt(i);
+                        flagIndexes.Add(i);
                         break;
                     case "--fbx-uvs-as-diffuse":
                         if (o_workMode.Value != WorkMode.SplitObjects)
@@ -695,19 +723,23 @@ namespace AssetStudioCLI.Options
                             return;
                         }
                         f_fbxUvsAsDiffuseMaps.Value = true;
-                        processedArgs.RemoveAt(i);
+                        flagIndexes.Add(i);
                         break;
                     case "--filter-with-regex":
                         f_filterWithRegex.Value = true;
-                        processedArgs.RemoveAt(i);
+                        flagIndexes.Add(i);
+                        break;
+                    case "--decompress-to-disk":
+                        f_decompressToDisk.Value = true;
+                        flagIndexes.Add(i);
                         break;
                     case "--not-restore-extension":
                         f_notRestoreExtensionName.Value = true;
-                        processedArgs.RemoveAt(i);
+                        flagIndexes.Add(i);
                         break;
-                    case "--avoid-typetree-loading":
+                    case "--ignore-typetree":
                         f_avoidLoadingViaTypetree.Value = true;
-                        processedArgs.RemoveAt(i);
+                        flagIndexes.Add(i);
                         break;
                     case "--load-all":
                         switch (o_workMode.Value)
@@ -716,7 +748,7 @@ namespace AssetStudioCLI.Options
                             case WorkMode.Dump:
                             case WorkMode.Info:
                                 f_loadAllAssets.Value = true;
-                                processedArgs.RemoveAt(i);
+                                flagIndexes.Add(i);
                                 break;
                             default:
                                 Console.WriteLine($"{"Error".Color(brightRed)} during parsing [{flag.Color(brightYellow)}] flag. This flag is not suitable for the current working mode [{o_workMode.Value}].\n");
@@ -725,7 +757,11 @@ namespace AssetStudioCLI.Options
                         }
                         break;
                 }
-            }            
+            }
+            for (var i = 0; i < flagIndexes.Count; i++)
+            {
+                processedArgs.RemoveAt(flagIndexes[i] - i);
+            }
             #endregion
 
             #region Parse Options
@@ -996,6 +1032,7 @@ namespace AssetStudioCLI.Options
                                 case "monobehaviour":
                                     o_l2dMotionMode.Value = CubismLive2DExtractor.Live2DMotionMode.MonoBehaviour;
                                     break;
+                                case "clip":
                                 case "animationclip":
                                 case "animationclipv2":
                                     o_l2dMotionMode.Value = CubismLive2DExtractor.Live2DMotionMode.AnimationClipV2;
@@ -1366,6 +1403,7 @@ namespace AssetStudioCLI.Options
             sb.AppendLine($"# Unity Version: {unityVer}");
             if (o_workMode.Value != WorkMode.Extract)
             {
+                sb.AppendLine($"# Decompress Bundles To Disk: {f_decompressToDisk.Value}");
                 sb.AppendLine($"# Parse Assets Using TypeTree: {!f_avoidLoadingViaTypetree.Value}");
                 sb.AppendLine($"# Export Asset List: {o_exportAssetList}");
             }
@@ -1383,7 +1421,8 @@ namespace AssetStudioCLI.Options
                     if (o_workMode.Value != WorkMode.Info)
                     {
                         sb.AppendLine($"# Asset Group Option: {o_groupAssetsBy}");
-                        sb.AppendLine($"# Filename format: {o_filenameFormat}");
+                        sb.AppendLine($"# Filename Format: {o_filenameFormat}");
+                        sb.AppendLine($"# Overwrite Existing Files: {f_overwriteExisting}");
                     }
                     if (o_workMode.Value == WorkMode.Export)
                     {

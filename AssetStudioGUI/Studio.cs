@@ -90,6 +90,7 @@ namespace AssetStudioGUI
         public static Dictionary<MonoBehaviour, CubismModel> l2dModelDict = new Dictionary<MonoBehaviour, CubismModel>();
         private static Dictionary<Object, string> l2dAssetContainers = new Dictionary<Object, string>();
         internal static Action<string> StatusStripUpdate = x => { };
+        internal static Fbx.Settings FbxSettings;
 
         public static int ExtractFolder(string path, string savePath)
         {
@@ -141,13 +142,13 @@ namespace AssetStudioGUI
             var count = 0;
             var bundleStream = new OffsetStream(reader);
             var bundleReader = new FileReader(reader.FullPath, bundleStream);
-            var bundleFile = new BundleFile(bundleReader, assetsManager.CustomBlockInfoCompression, assetsManager.CustomBlockCompression, assetsManager.SpecifyUnityVersion);
+            var bundleFile = new BundleFile(bundleReader, assetsManager.Options.BundleOptions);
             var extractPath = Path.Combine(savePath, reader.FileName + "_unpacked");
-            if (bundleFile.fileList.Length > 0)
+            if (bundleFile.fileList.Count > 0)
             {
                 count += ExtractStreamFile(extractPath, bundleFile.fileList);
             }
-            while (bundleFile.IsMultiBundle)
+            while (bundleFile.IsDataAfterBundle)
             {
                 bundleStream.Offset = reader.Position;
                 bundleReader = new FileReader($"{reader.FullPath}_0x{bundleStream.Offset:X}", bundleStream);
@@ -160,8 +161,8 @@ namespace AssetStudioGUI
                     bundleReader.FileName = $"{reader.FileName}_0x{bundleStream.Offset:X}";
                 }
                 Logger.Info($"[MultiBundle] Decompressing \"{reader.FileName}\" from offset: 0x{bundleStream.Offset:X}..");
-                bundleFile = new BundleFile(bundleReader, assetsManager.CustomBlockInfoCompression, assetsManager.CustomBlockCompression, assetsManager.SpecifyUnityVersion);
-                if (bundleFile.fileList.Length > 0)
+                bundleFile = new BundleFile(bundleReader, assetsManager.Options.BundleOptions, isMultiBundle: true);
+                if (bundleFile.fileList.Count > 0)
                 {
                     count += ExtractStreamFile(extractPath, bundleFile.fileList);
                 }
@@ -175,19 +176,21 @@ namespace AssetStudioGUI
             Logger.Info($"Decompressing {reader.FileName} ...");
             var webFile = new WebFile(reader);
             reader.Dispose();
-            if (webFile.fileList.Length > 0)
+            if (webFile.fileList.Count > 0)
             {
                 var extractPath = Path.Combine(savePath, reader.FileName + "_unpacked");
-                return ExtractStreamFile(extractPath, webFile.fileList);
+                return ExtractStreamFile(extractPath, webFile.fileList, isOffsetStream: false);
             }
             return 0;
         }
 
-        private static int ExtractStreamFile(string extractPath, StreamFile[] fileList)
+        private static int ExtractStreamFile(string extractPath, List<StreamFile> fileList, bool isOffsetStream = true)
         {
-            int extractedCount = 0;
+            var extractedCount = 0;
             foreach (var file in fileList)
             {
+                if (file.stream == null)
+                    continue;
                 var filePath = Path.Combine(extractPath, file.path);
                 var fileDirectory = Path.GetDirectoryName(filePath);
                 if (!Directory.Exists(fileDirectory))
@@ -198,11 +201,16 @@ namespace AssetStudioGUI
                 {
                     using (var fileStream = File.Create(filePath))
                     {
-                        file.stream.CopyTo(fileStream);
+                        file.stream.Position = 0;
+                        file.stream.CopyTo(fileStream, file.stream.Length);
                     }
-                    extractedCount += 1;
+                    extractedCount++;
                 }
-                file.stream.Dispose();
+                if (!isOffsetStream) file.stream.Dispose();
+            }
+            if (isOffsetStream && fileList.Count > 0)
+            {
+                fileList[0].stream?.Dispose();
             }
             return extractedCount;
         }
@@ -212,16 +220,16 @@ namespace AssetStudioGUI
             Logger.Info("Building asset list...");
 
             string productName = null;
-            var objectCount = assetsManager.assetsFileList.Sum(x => x.Objects.Count);
+            var objectCount = assetsManager.AssetsFileList.Sum(x => x.Objects.Count);
             var objectAssetItemDic = new Dictionary<Object, AssetItem>(objectCount);
             var containers = new List<(PPtr<Object>, string)>();
             var tex2dArrayAssetList = new List<AssetItem>();
             l2dAssetContainers.Clear();
             var i = 0;
             Progress.Reset();
-            foreach (var assetsFile in assetsManager.assetsFileList)
+            foreach (var assetsFile in assetsManager.AssetsFileList)
             {
-                var preloadTable = Array.Empty<PPtr<Object>>();
+                var preloadTable = new List<PPtr<Object>>();
 
                 foreach (var asset in assetsFile.Objects)
                 {
@@ -333,7 +341,7 @@ namespace AssetStudioGUI
                             {
                                 var preloadIndex = m_Container.Value.preloadIndex;
                                 var preloadSize = isStreamedSceneAssetBundle
-                                    ? preloadTable.Length
+                                    ? preloadTable.Count
                                     : m_Container.Value.preloadSize;
                                 var preloadEnd = preloadIndex + preloadSize;
                                 for (var k = preloadIndex; k < preloadEnd; k++)
@@ -421,10 +429,10 @@ namespace AssetStudioGUI
 
             var treeNodeCollection = new List<TreeNode>();
             var treeNodeDictionary = new Dictionary<GameObject, GameObjectTreeNode>();
-            var assetsFileCount = assetsManager.assetsFileList.Count;
+            var assetsFileCount = assetsManager.AssetsFileList.Count;
             var j = 0;
             Progress.Reset();
-            foreach (var assetsFile in assetsManager.assetsFileList)
+            foreach (var assetsFile in assetsManager.AssetsFileList)
             {
                 var fileNode = new TreeNode(assetsFile.fileName); //RootNode
 
@@ -497,7 +505,7 @@ namespace AssetStudioGUI
         public static Dictionary<UnityVersion, SortedDictionary<int, TypeTreeItem>> BuildClassStructure()
         {
             var typeMap = new Dictionary<UnityVersion, SortedDictionary<int, TypeTreeItem>>();
-            foreach (var assetsFile in assetsManager.assetsFileList)
+            foreach (var assetsFile in assetsManager.AssetsFileList)
             {
                 if (typeMap.TryGetValue(assetsFile.version, out var curVer))
                 {
@@ -669,6 +677,7 @@ namespace AssetStudioGUI
 
                     Progress.Report(++i, toExportCount);
                 }
+                Exporter.ClearHash();
 
                 Parallel.ForEach(toParallelExportAssetDict, new ParallelOptions { MaxDegreeOfParallelism = parallelExportCount }, (toExportAsset, loopState) =>
                 {
@@ -854,7 +863,6 @@ namespace AssetStudioGUI
             {
                 Progress.Reset();
                 Logger.Info($"Exporting {animator.Text}");
-                Logger.Debug($"Selected AnimationClip(s):\n\"{string.Join("\"\n\"", animationList.Select(x => x.Text))}\"");
                 try
                 {
                     ExportAnimator(animator, exportPath, animationList);
@@ -889,7 +897,8 @@ namespace AssetStudioGUI
                         Logger.Info($"Exporting {gameObject.m_Name}");
                         try
                         {
-                            ExportGameObject(gameObject, exportPath, animationList);
+                            var modelExportPath = Path.Combine(exportPath, gameObject.m_Name) + Path.DirectorySeparatorChar;
+                            ExportGameObject(gameObject, modelExportPath, animationList);
                             Logger.Info($"Finished exporting {gameObject.m_Name}");
                         }
                         catch (Exception ex)

@@ -13,7 +13,7 @@ namespace AssetStudioCLI
             {
                 CLIRun();
             }
-            else if (CLIOptions.o_displayHelp.Value)
+            else if (CLIOptions.f_displayHelp.Value)
             {
                 CLIOptions.ShowHelp();
             }
@@ -73,6 +73,7 @@ namespace AssetStudioCLI
             }
             finally
             {
+                Studio.Clear();
                 cliLogger.LogToFile(LoggerEvent.Verbose, "---Program ended---");
             }
         }       
